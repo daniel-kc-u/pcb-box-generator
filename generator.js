@@ -73,11 +73,14 @@
 //   floor (Z=0) regardless of which side of the parting line they fall on.
 // ============================================================================
 
-const { primitives, booleans, transforms, colors } = require('@jscad/modeling')
-const { cuboid, cylinder } = primitives
+const { primitives, booleans, transforms, colors, text: textApi, hulls, extrusions } = require('@jscad/modeling')
+const { cuboid, cylinder, circle } = primitives
 const { union, subtract } = booleans
-const { translate } = transforms
+const { translate, rotateZ } = transforms
 const { colorize } = colors
+const { vectorText } = textApi
+const { hullChain } = hulls
+const { extrudeLinear } = extrusions
 
 // Small overlap used at internal boolean seams to avoid coincident-face
 // artifacts ("z-fighting") in the CSG kernel, and to guarantee split
@@ -99,7 +102,7 @@ const getParameterDefinitions = () => [
   { name: 'pcbThickness', type: 'float', initial: 1.6, caption: 'PCB Thickness, Z (mm)' },
 
   { name: 'gFit', type: 'group', caption: 'Fit & Clearance' },
-  { name: 'pcbClearance', type: 'float', initial: 0.5, caption: 'Clearance around PCB edges (mm)' },
+  { name: 'pcbClearance', type: 'float', initial: 5, caption: 'Clearance around PCB edges (mm)' },
   { name: 'standoffHeight', type: 'float', initial: 3, caption: 'Standoff/boss height under PCB (mm)' },
   { name: 'topClearance', type: 'float', initial: 6, caption: 'Clearance above PCB/components (mm)' },
 
@@ -117,31 +120,6 @@ const getParameterDefinitions = () => [
     caption: 'Parting line height, from floor (mm) -- place it through tall ports to avoid bridging'
   },
 
-  { name: 'gBoss', type: 'group', caption: 'Screw Bosses' },
-  { name: 'bossOuterDiameter', type: 'float', initial: 6, caption: 'Boss outer diameter (mm)' },
-  { name: 'bossHoleDiameter', type: 'float', initial: 2.6, caption: 'Boss screw-hole diameter (mm)' },
-  { name: 'bossHoleDepth', type: 'float', initial: 6, caption: 'Boss hole depth, from boss top (mm) -- clamped to stay blind' },
-  {
-    name: 'bossPositions',
-    type: 'text',
-    initial: '-20,-12;20,-12;-20,12;20,12',
-    caption: 'Boss positions "x,y;x,y;..." relative to PCB center (mm) -- keep clear of fastener positions below'
-  },
-
-  { name: 'gFastener', type: 'group', caption: 'Lid Fastening Screws' },
-  {
-    name: 'fastenerPositions',
-    type: 'text',
-    initial: '-28,-18;28,-18;-28,18;28,18',
-    caption: 'Fastener positions "x,y;x,y;..." relative to PCB center (mm)'
-  },
-  { name: 'fastenerBossDiameter', type: 'float', initial: 7, caption: 'Fastener boss outer diameter (mm)' },
-  { name: 'fastenerTapHoleDiameter', type: 'float', initial: 2.6, caption: 'Fastener tap-hole diameter, in box boss (mm)' },
-  { name: 'fastenerTapHoleDepth', type: 'float', initial: 4, caption: 'Fastener tap-hole depth, from boss top (mm) -- clamped to stay blind' },
-  { name: 'fastenerScrewClearanceDiameter', type: 'float', initial: 3.4, caption: 'Fastener shaft clearance diameter, through lid (mm)' },
-  { name: 'fastenerHeadDiameter', type: 'float', initial: 6, caption: 'Fastener screw head / counterbore diameter (mm)' },
-  { name: 'fastenerCountersinkDepth', type: 'float', initial: 1.8, caption: 'Counterbore depth, from lid outer surface (mm)' },
-
   { name: 'gPorts', type: 'group', caption: 'Side Port Openings' },
   {
     name: 'portOpenings',
@@ -152,7 +130,7 @@ const getParameterDefinitions = () => [
       'Ports crossing the parting line are auto-split between box and lid.'
   },
 
-  { name: 'gLidTop', type: 'group', caption: 'Lid Top Openings (Jumper/Wire Pass-Throughs)' },
+  { name: 'gLidTop', type: 'group', caption: 'Lid Top Openings' },
   {
     name: 'lidTopOpenings',
     type: 'text',
@@ -161,9 +139,37 @@ const getParameterDefinitions = () => [
       'Lid top openings "x,y,width,height;..." (rectangular). x,y relative to PCB center (mm)'
   },
 
+  { name: 'gFastener', type: 'group', caption: 'Lid Fastening Screws' },
+  {
+    name: 'fastenerPositions',
+    type: 'text',
+    initial: '-33,-23;33,-23;-33,23;33,23',
+    caption: 'Fastener positions "x,y;x,y;..." relative to PCB center (mm)'
+  },
+  { name: 'fastenerBossDiameter', type: 'float', initial: 7, caption: 'Fastener boss outer diameter (mm)' },
+  { name: 'fastenerTapHoleDiameter', type: 'float', initial: 2.6, caption: 'Fastener tap-hole diameter, in box boss (mm)' },
+  { name: 'fastenerTapHoleDepth', type: 'float', initial: 4, caption: 'Fastener tap-hole depth, from boss top (mm) -- clamped to stay blind' },
+  { name: 'fastenerScrewClearanceDiameter', type: 'float', initial: 3.4, caption: 'Fastener shaft clearance diameter, through lid (mm)' },
+  { name: 'fastenerHeadDiameter', type: 'float', initial: 6, caption: 'Fastener screw head / counterbore diameter (mm)' },
+  { name: 'fastenerCountersinkDepth', type: 'float', initial: 1.8, caption: 'Counterbore depth, from lid outer surface (mm)' },
+
+  { name: 'gBoss', type: 'group', caption: 'PCB Screws' },
+  { name: 'bossOuterDiameter', type: 'float', initial: 6, caption: 'Boss outer diameter (mm)' },
+  { name: 'bossHoleDiameter', type: 'float', initial: 2.6, caption: 'Boss screw-hole diameter (mm)' },
+  { name: 'bossHoleDepth', type: 'float', initial: 6, caption: 'Boss hole depth, from boss top (mm) -- clamped to stay blind' },
+  {
+    name: 'bossPositions',
+    type: 'text',
+    initial: '-20,-12;20,-12;-20,12;20,12',
+    caption: 'Boss positions "x,y;x,y;..." relative to PCB center (mm) -- keep clear of fastener positions below'
+  },
+
   { name: 'gOutput', type: 'group', caption: 'Output' },
   { name: 'showBox', type: 'checkbox', checked: true, caption: 'Show box' },
   { name: 'showLid', type: 'checkbox', checked: true, caption: 'Show lid' },
+  { name: 'showPcbPreview', type: 'checkbox', checked: true, caption: 'Show reference PCB' },
+  { name: 'showPcbDimensions', type: 'checkbox', checked: true, caption: 'Show PCB length/width/hole dimensions' },
+  { name: 'showOpeningMarkers', type: 'checkbox', checked: true, caption: 'Show port/lid-opening positions on the PCB' },
   { name: 'explodedView', type: 'checkbox', checked: true, caption: 'Lift lid for viewing (not for export/print)' },
   { name: 'explodeDistance', type: 'float', initial: 15, caption: 'Lid lift distance (mm)' }
 ]
@@ -182,6 +188,33 @@ const parseRows = (str) =>
 
 const isValidRow = (row) => row.every((n) => Number.isFinite(n))
 
+// Builds a small flat block of 3D "vector font" text (the standard jscad
+// recipe: vectorText -> a chain of hulled circles per stroke -> extrude),
+// centered on the origin in X, extruded a short distance up +Z. Callers
+// translate/rotate/colorize it into place. Used only for PCB-preview
+// annotations -- never part of the printed box/lid geometry.
+const makeLabel = (str, charHeight, extrudeHeight) => {
+  const s = String(str)
+  if (s.length === 0) return null
+  const strokeRadius = charHeight * 0.08
+  const paths = vectorText({ x: 0, y: 0, height: charHeight }, s)
+  const strokes = paths
+    .filter((pts) => pts.length > 0)
+    .map((pts) =>
+      pts.length === 1
+        ? circle({ radius: strokeRadius, center: pts[0], segments: 8 })
+        : hullChain(pts.map((p) => circle({ radius: strokeRadius, center: p, segments: 8 })))
+    )
+  if (strokes.length === 0) return null
+  const flat = extrudeLinear({ height: extrudeHeight }, union(strokes))
+
+  // vectorText lays characters out left-to-right starting at x=0; shift
+  // by an approximate half-width so callers can position by the label's
+  // horizontal middle instead of its start.
+  const approxWidth = charHeight * 0.6 * s.length
+  return translate([-approxWidth / 2, 0, 0], flat)
+}
+
 // ----------------------------------------------------------------------------
 // Main
 // ----------------------------------------------------------------------------
@@ -197,6 +230,7 @@ const main = (params) => {
     fastenerScrewClearanceDiameter, fastenerHeadDiameter, fastenerCountersinkDepth,
     portOpenings,
     lidTopOpenings,
+    showPcbPreview, showPcbDimensions, showOpeningMarkers,
     showBox, showLid, explodedView, explodeDistance
   } = params
 
@@ -230,7 +264,7 @@ const main = (params) => {
 
   let box = subtract(boxOuter, mainCavity)
 
-  // ---- screw bosses (solid posts + coaxial screw holes) ----
+  // ---- PCB screw bosses (solid posts + coaxial screw holes) ----
   const bossRadius = bossOuterDiameter / 2
   const holeRadius = bossHoleDiameter / 2
   const bossTopZ = floorThickness + standoffHeight
@@ -385,6 +419,130 @@ const main = (params) => {
     lid = subtract(lid, cutter)
   })
 
+  // ==========================================================================
+  // PCB PREVIEW -- translucent reference PCB + dimension/opening annotations.
+  // Visualization only: sits in the assembled position but is never part of
+  // the printed box/lid geometry, and (unlike the lid) is never shifted by
+  // explodedView since it stays seated on the box's standoffs either way.
+  // ==========================================================================
+  const previewParts = []
+  if (showPcbPreview) {
+    const labelH = 1.4       // vector-text character height, mm
+    const labelX = 0.6       // extrusion height of label/annotation geometry, mm
+    const pcbTopZ = pcbZTop + EPS
+    const bossHoleRadius = bossHoleDiameter / 2
+
+    // ---- PCB slab, with mounting holes cut at the boss positions ----
+    let pcbSlab = translate(
+      [0, 0, pcbZBottom + pcbThickness / 2],
+      cuboid({ size: [pcbLength, pcbWidth, pcbThickness] })
+    )
+    parseRows(bossPositions).forEach((row) => {
+      if (!isValidRow(row) || row.length < 2) return
+      const [x, y] = row
+      const hole = translate(
+        [x, y, pcbZBottom + pcbThickness / 2],
+        cylinder({ radius: bossHoleRadius, height: pcbThickness + EPS * 2, segments: circleSegments })
+      )
+      pcbSlab = subtract(pcbSlab, hole)
+    })
+    previewParts.push(colorize([0.15, 0.55, 0.25, 0.55], pcbSlab))
+
+    if (showPcbDimensions) {
+      const dimColor = [0.9, 0.85, 0.05]
+      const dimOffset = 10      // distance of dimension line from PCB edge, mm
+      const witnessLen = dimOffset - 1
+
+      // ---- overall length (X), witness lines + dimension line + label,
+      // laid out below the PCB's -Y edge ----
+      const lenDimY = -pcbWidth / 2 - dimOffset
+      const lengthAnnotation = union([
+        translate([0, lenDimY, pcbTopZ], cuboid({ size: [pcbLength, 0.3, labelX] })),
+        translate([-pcbLength / 2, lenDimY + witnessLen / 2, pcbTopZ], cuboid({ size: [0.3, witnessLen, labelX] })),
+        translate([pcbLength / 2, lenDimY + witnessLen / 2, pcbTopZ], cuboid({ size: [0.3, witnessLen, labelX] }))
+      ])
+      previewParts.push(colorize(dimColor, lengthAnnotation))
+      const lengthLabel = makeLabel(`${pcbLength}mm`, labelH, labelX)
+      if (lengthLabel) previewParts.push(colorize(dimColor, translate([0, lenDimY - 3, pcbTopZ], lengthLabel)))
+
+      // ---- overall width (Y), laid out left of the PCB's -X edge ----
+      const widDimX = -pcbLength / 2 - dimOffset
+      const widthAnnotation = union([
+        translate([widDimX, 0, pcbTopZ], cuboid({ size: [0.3, pcbWidth, labelX] })),
+        translate([widDimX + witnessLen / 2, -pcbWidth / 2, pcbTopZ], cuboid({ size: [witnessLen, 0.3, labelX] })),
+        translate([widDimX + witnessLen / 2, pcbWidth / 2, pcbTopZ], cuboid({ size: [witnessLen, 0.3, labelX] }))
+      ])
+      previewParts.push(colorize(dimColor, widthAnnotation))
+      const widthLabel = makeLabel(`${pcbWidth}mm`, labelH, labelX)
+      if (widthLabel) {
+        previewParts.push(colorize(dimColor, translate([widDimX - 3, 0, pcbTopZ], rotateZ(Math.PI / 2, widthLabel))))
+      }
+
+      // ---- mounting-hole position labels ----
+      parseRows(bossPositions).forEach((row) => {
+        if (!isValidRow(row) || row.length < 2) return
+        const [x, y] = row
+        const holeLabel = makeLabel(`${x},${y}`, labelH * 0.8, labelX)
+        if (holeLabel) {
+          previewParts.push(colorize(dimColor, translate([x, y - bossHoleRadius - 2.5, pcbTopZ], holeLabel)))
+        }
+      })
+    }
+
+    if (showOpeningMarkers) {
+      // ---- lid top openings: their x,y are already PCB-centered
+      // coordinates, so draw the cutout outline directly on the PCB ----
+      const lidOpeningColor = [0.95, 0.45, 0.05]
+      parseRows(lidTopOpenings).forEach((row) => {
+        if (!isValidRow(row) || row.length < 4) return
+        const [x, y, width, height] = row
+        const frameThickness = 0.6
+        const outerRect = cuboid({ size: [width, height, labelX] })
+        const innerRect = cuboid({
+          size: [Math.max(width - frameThickness * 2, 0.1), Math.max(height - frameThickness * 2, 0.1), labelX * 2]
+        })
+        previewParts.push(colorize([...lidOpeningColor, 0.9], translate([x, y, pcbTopZ], subtract(outerRect, innerRect))))
+
+        const posLabel = makeLabel(`${x},${y} ${width}x${height}`, labelH * 0.8, labelX)
+        if (posLabel) {
+          previewParts.push(colorize(lidOpeningColor, translate([x, y + height / 2 + 2.5, pcbTopZ], posLabel)))
+        }
+      })
+
+      // ---- side ports: a marker spanning the opening's width, drawn at
+      // the PCB edge it faces, labeled with its wall position and Z range ----
+      const sidePortColor = [0.85, 0.1, 0.6]
+      const markerThickness = 1.2
+      parseRows(portOpenings).forEach((row) => {
+        if (!isValidRow(row) || row.length < 5) return
+        const [side, pos, width, , zOff] = row
+        const height = row[3]
+        let marker = null
+        let labelPos = null
+        let label = makeLabel(`${pos} @ z${zOff}-${zOff + height} ${width}x${height}`, labelH * 0.7, labelX)
+
+        if (side === 0) { // front, -Y
+          marker = translate([pos, -pcbWidth / 2 + markerThickness / 2, pcbTopZ], cuboid({ size: [width, markerThickness, labelX] }))
+          labelPos = [pos, -pcbWidth / 2 + markerThickness + 2.5, pcbTopZ]
+        } else if (side === 2) { // back, +Y
+          marker = translate([pos, pcbWidth / 2 - markerThickness / 2, pcbTopZ], cuboid({ size: [width, markerThickness, labelX] }))
+          labelPos = [pos, pcbWidth / 2 - markerThickness - 2.5, pcbTopZ]
+        } else if (side === 1) { // right, +X
+          marker = translate([pcbLength / 2 - markerThickness / 2, pos, pcbTopZ], cuboid({ size: [markerThickness, width, labelX] }))
+          labelPos = [pcbLength / 2 - markerThickness - 2.5, pos, pcbTopZ]
+          label = label && rotateZ(Math.PI / 2, label)
+        } else if (side === 3) { // left, -X
+          marker = translate([-pcbLength / 2 + markerThickness / 2, pos, pcbTopZ], cuboid({ size: [markerThickness, width, labelX] }))
+          labelPos = [-pcbLength / 2 + markerThickness + 2.5, pos, pcbTopZ]
+          label = label && rotateZ(Math.PI / 2, label)
+        }
+
+        if (marker) previewParts.push(colorize([...sidePortColor, 0.9], marker))
+        if (label && labelPos) previewParts.push(colorize(sidePortColor, translate(labelPos, label)))
+      })
+    }
+  }
+
   // For viewing only: lift the lid clear of the box so both parts are
   // visible at once. Turn this off before exporting STLs for printing.
   if (explodedView) {
@@ -395,6 +553,7 @@ const main = (params) => {
   const parts = []
   if (showBox) parts.push(colorize([0.55, 0.55, 0.6], box))
   if (showLid) parts.push(colorize([0.25, 0.55, 0.85, 0.85], lid))
+  parts.push(...previewParts)
 
   return parts
 }
