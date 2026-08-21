@@ -102,7 +102,8 @@ const getParameterDefinitions = () => [
   { name: 'pcbThickness', type: 'float', initial: 1.6, caption: 'PCB Thickness, Z (mm)' },
 
   { name: 'gFit', type: 'group', caption: 'Fit & Clearance' },
-  { name: 'pcbClearance', type: 'float', initial: 5, caption: 'Clearance around PCB edges (mm)' },
+  { name: 'pcbClearanceX', type: 'float', initial: 5, caption: 'Clearance around PCB edges, X (mm)' },
+  { name: 'pcbClearanceY', type: 'float', initial: 5, caption: 'Clearance around PCB edges, Y (mm)' },
   { name: 'standoffHeight', type: 'float', initial: 3, caption: 'Standoff/boss height under PCB (mm)' },
   { name: 'topClearance', type: 'float', initial: 6, caption: 'Clearance above PCB/components (mm)' },
 
@@ -221,7 +222,7 @@ const makeLabel = (str, charHeight, extrudeHeight) => {
 const main = (params) => {
   const {
     pcbLength, pcbWidth, pcbThickness,
-    pcbClearance, standoffHeight, topClearance,
+    pcbClearanceX, pcbClearanceY, standoffHeight, topClearance,
     wallThickness, floorThickness, lidCeilingThickness, circleSegments,
     splitHeight,
     bossOuterDiameter, bossHoleDiameter, bossHoleDepth, bossPositions,
@@ -235,8 +236,8 @@ const main = (params) => {
   } = params
 
   // ---- derived footprint dimensions ----
-  const innerLength = pcbLength + 2 * pcbClearance   // PCB compartment, X
-  const innerWidth = pcbWidth + 2 * pcbClearance      // PCB compartment, Y
+  const innerLength = pcbLength + 2 * pcbClearanceX   // PCB compartment, X
+  const innerWidth = pcbWidth + 2 * pcbClearanceY      // PCB compartment, Y
   const outerLength = innerLength + 2 * wallThickness // outside of shell, X
   const outerWidth = innerWidth + 2 * wallThickness   // outside of shell, Y
 
