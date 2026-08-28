@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PCB Box Generator</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: sans-serif;
+    background: #1b1e23;
+    color: #e6e6e6;
+  }
+  #app {
+    display: flex;
+    height: 100vh;
+  }
+  #sidebar {
+    width: 320px;
+    flex: none;
+    overflow-y: auto;
+    background: #22262d;
+    border-right: 1px solid #33383f;
+    padding: 12px;
+    box-sizing: border-box;
+  }
+  #sidebar h1 {
+    font-size: 15px;
+    margin: 0 0 4px;
+  }
+  #sidebar .subtitle {
+    font-size: 11px;
+    color: #9099a3;
+    margin: 0 0 14px;
+    line-height: 1.4;
+  }
+  #sidebar .subtitle a { color: #6cb0ff; }
+  details {
+    border: 1px solid #33383f;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    background: #262b32;
+  }
+  summary {
+    cursor: pointer;
+    padding: 8px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #cfd4da;
+    outline: none;
+    user-select: none;
+  }
+  .field {
+    padding: 6px 10px 10px;
+  }
+  .field label {
+    display: block;
+    font-size: 11px;
+    color: #9099a3;
+    margin-bottom: 3px;
+    line-height: 1.3;
+  }
+  .field input[type="text"],
+  .field input[type="number"] {
+    width: 100%;
+    box-sizing: border-box;
+    background: #1b1e23;
+    border: 1px solid #3a4048;
+    border-radius: 4px;
+    color: #e6e6e6;
+    padding: 5px 7px;
+    font-size: 12px;
+  }
+  .field.checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .field.checkbox label { margin-bottom: 0; }
+  #controls {
+    position: sticky;
+    bottom: 0;
+    background: #22262d;
+    padding-top: 8px;
+    margin-top: 4px;
+  }
+  #downloadStl {
+    width: 100%;
+    padding: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    background: #2f9e63;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #downloadStl:hover { background: #38b473; }
+  #viewport {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+  }
+  #jscad {
+    width: 100%;
+    height: 100%;
+    touch-action: none;
+  }
+  #hint {
+    position: absolute;
+    left: 12px;
+    bottom: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #f0f2f5;
+    background: rgba(20, 22, 26, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+    padding: 6px 9px;
+    border-radius: 5px;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div id="sidebar">
+    <h1>PCB Box Generator</h1>
+    <p class="subtitle">
+      Live preview of <a href="https://github.com/daniel-kc-u/pcb-box-generator">generator.js</a>, rendered with
+      <a href="https://github.com/jscad/OpenJSCAD.org/blob/master/packages/utils/regl-renderer/README.md">jscad/regl-renderer</a>.
+      Edit parameters below to match your PCB and download box + lid separately as STL. All units in mm.
+    </p>
+    <form id="paramForm"></form>
+    <div id="controls">
+      <button type="button" id="downloadStl">Download STL</button>
+    </div>
+  </div>
+  <div id="viewport">
+    <div id="jscad"></div>
+    <div id="hint">drag: rotate &middot; shift+drag: pan &middot; scroll: zoom</div>
+  </div>
+</div>
+
+<script language="javascript" src="https://unpkg.com/@jscad/modeling@2.13.0/dist/jscad-modeling.min.js"></script>
+<script language="javascript" src="https://unpkg.com/@jscad/regl-renderer@2.6.15/dist/jscad-regl-renderer.min.js"></script>
+
+<script language="javascript">
+// ----------------------------------------------------------------------------
+// Load the generator itself, completely unmodified, by shimming just enough
+// of CommonJS (`require` / `module.exports`) for it to run as a plain
+// browser script. `@jscad/modeling` is what the UMD bundle above exposes as
+// `window.jscadModeling`.
+// ----------------------------------------------------------------------------
+window.module = { exports: {} }
+window.require = function (name) {
+  if (name === '@jscad/modeling') return window.jscadModeling
+  throw new Error('demo page cannot resolve require("' + name + '")')
+}
+</script>
+<script language="javascript" src="../generator.js"></script>
+<script language="javascript">
+const genGetParameterDefinitions = window.module.exports.getParameterDefinitions
+const genMain = window.module.exports.main
+
+// ----------------------------------------------------------------------------
+// Build a parameter form straight from getParameterDefinitions(), grouped by
+// the same 'group' markers the OpenJSCAD desktop/CLI UI uses.
+// ----------------------------------------------------------------------------
+const paramDefs = genGetParameterDefinitions()
+const form = document.getElementById('paramForm')
+
+let currentGroup = null
+paramDefs.forEach((def) => {
+  if (def.type === 'group') {
+    const details = document.createElement('details')
+    details.open = def.initial !== 'closed'
+    const summary = document.createElement('summary')
+    summary.textContent = def.caption || def.name
+    details.appendChild(summary)
+    form.appendChild(details)
+    currentGroup = details
+    return
+  }
+
+  const wrap = document.createElement('div')
+  wrap.className = 'field' + (def.type === 'checkbox' ? ' checkbox' : '')
+
+  const input = document.createElement('input')
+  input.id = 'param_' + def.name
+  input.dataset.name = def.name
+  input.dataset.type = def.type
+
+  if (def.type === 'checkbox') {
+    input.type = 'checkbox'
+    input.checked = !!def.checked
+  } else if (def.type === 'float') {
+    input.type = 'number'
+    input.step = 'any'
+    input.value = def.initial
+  } else if (def.type === 'int') {
+    input.type = 'number'
+    input.step = '1'
+    input.value = def.initial
+  } else {
+    input.type = 'text'
+    input.value = def.initial
+  }
+
+  const label = document.createElement('label')
+  label.htmlFor = input.id
+  label.textContent = def.caption || def.name
+
+  if (def.type === 'checkbox') {
+    wrap.appendChild(input)
+    wrap.appendChild(label)
+  } else {
+    wrap.appendChild(label)
+    wrap.appendChild(input)
+  }
+
+  ;(currentGroup || form).appendChild(wrap)
+})
+
+const readParams = () => {
+  const params = {}
+  paramDefs.forEach((def) => {
+    if (def.type === 'group') return
+    const input = document.getElementById('param_' + def.name)
+    if (def.type === 'checkbox') {
+      params[def.name] = input.checked
+    } else if (def.type === 'float' || def.type === 'int') {
+      params[def.name] = parseFloat(input.value)
+    } else {
+      params[def.name] = input.value
+    }
+  })
+  return params
+}
+
+// ----------------------------------------------------------------------------
+// Renderer setup, following the regl-renderer demo.html / demo-web.js pattern.
+// ----------------------------------------------------------------------------
+const { prepareRender, drawCommands, cameras, controls, entitiesFromSolids } = jscadReglRenderer
+const perspectiveCamera = cameras.perspective
+const orbitControls = controls.orbit
+
+const containerElement = document.getElementById('jscad')
+
+const state = { camera: Object.assign({}, perspectiveCamera.defaults), controls: orbitControls.defaults }
+perspectiveCamera.setProjection(state.camera, state.camera, {
+  width: containerElement.clientWidth,
+  height: containerElement.clientHeight
+})
+state.camera.position = [180, -260, 200]
+perspectiveCamera.update(state.camera, state.camera)
+
+const renderer = prepareRender({
+  glOptions: { container: containerElement, attributes: { preserveDrawingBuffer: true } }
+})
+
+const gridOptions = {
+  visuals: { drawCmd: 'drawGrid', show: true },
+  size: [300, 300],
+  ticks: [10, 5]
+}
+const axisOptions = {
+  visuals: { drawCmd: 'drawAxis', show: true },
+  size: 60
+}
+
+const renderOptions = {
+  camera: state.camera,
+  drawCommands: {
+    drawAxis: drawCommands.drawAxis,
+    drawGrid: drawCommands.drawGrid,
+    drawLines: drawCommands.drawLines,
+    drawMesh: drawCommands.drawMesh
+  },
+  entities: [gridOptions, axisOptions]
+}
+
+const regenerate = () => {
+  try {
+    const solids = genMain(readParams())
+    const entities = entitiesFromSolids({}, solids)
+    renderOptions.entities = [gridOptions, axisOptions, ...entities]
+  } catch (err) {
+    console.error(err)
+  }
+}
+
+// Re-render whenever a parameter changes. Checkboxes regenerate right away;
+// text/number fields are debounced so the model doesn't rebuild on every
+// keystroke
+let regenerateTimer = null
+form.addEventListener('input', (ev) => {
+  clearTimeout(regenerateTimer)
+  if (ev.target.type === 'checkbox') {
+    regenerate()
+  } else {
+    regenerateTimer = setTimeout(regenerate, 300)
+  }
+})
+
+// ----------------------------------------------------------------------------
+// STL export -- serializes every currently-visible solid (whatever the
+// "show" toggles and exploded-view state currently produce) to one ASCII
+// STL, the same conversion @jscad/stl-serializer does: triangulate every
+// geom3 polygon, then emit one STL facet per triangle. Reimplemented inline
+// since stl-serializer has no browser bundle, but the pieces it wraps
+// (geom3 polygons/planes, modifiers.generalize) come straight from the same
+// @jscad/modeling build already loaded above.
+// ----------------------------------------------------------------------------
+const solidsToStlText = (solids) => {
+  const { geometries, modifiers } = jscadModeling
+  const triangulated = [].concat(modifiers.generalize({ snap: true, triangulate: true }, solids))
+  const lines = ['solid JSCAD']
+  triangulated.forEach((solid) => {
+    geometries.geom3.toPolygons(solid).forEach((polygon) => {
+      const normal = geometries.poly3.plane(polygon)
+      const v = polygon.vertices
+      for (let i = 0; i < v.length - 2; i++) {
+        lines.push(`facet normal ${normal[0]} ${normal[1]} ${normal[2]}`)
+        lines.push('outer loop')
+        lines.push(`vertex ${v[0][0]} ${v[0][1]} ${v[0][2]}`)
+        lines.push(`vertex ${v[i + 1][0]} ${v[i + 1][1]} ${v[i + 1][2]}`)
+        lines.push(`vertex ${v[i + 2][0]} ${v[i + 2][1]} ${v[i + 2][2]}`)
+        lines.push('endloop')
+        lines.push('endfacet')
+      }
+    })
+  })
+  lines.push('endsolid JSCAD')
+  return lines.join('\n')
+}
+
+document.getElementById('downloadStl').addEventListener('click', () => {
+  try {
+    const { geometries } = jscadModeling
+    const solids = genMain(readParams()).filter((obj) => geometries.geom3.isA(obj))
+    if (solids.length === 0) throw new Error('nothing visible to export')
+
+    const blob = new Blob([solidsToStlText(solids)], { type: 'application/sla' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'model.stl'
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    console.error(err)
+  }
+})
+
+// ----------------------------------------------------------------------------
+// Orbit / pan / zoom, straight from the regl-renderer demo.
+// ----------------------------------------------------------------------------
+const rotateSpeed = 0.002
+const panSpeed = 1
+const zoomSpeed = 0.08
+let rotateDelta = [0, 0]
+let panDelta = [0, 0]
+let zoomDelta = 0
+let pointerDown = false
+let lastX = 0
+let lastY = 0
+
+const doRotatePanZoom = () => {
+  if (rotateDelta[0] || rotateDelta[1]) {
+    const updated = orbitControls.rotate({ controls: state.controls, camera: state.camera, speed: rotateSpeed }, rotateDelta)
+    state.controls = { ...state.controls, ...updated.controls }
+    rotateDelta = [0, 0]
+  }
+  if (panDelta[0] || panDelta[1]) {
+    const updated = orbitControls.pan({ controls: state.controls, camera: state.camera, speed: panSpeed }, panDelta)
+    state.controls = { ...state.controls, ...updated.controls }
+    panDelta = [0, 0]
+    state.camera.position = updated.camera.position
+    state.camera.target = updated.camera.target
+  }
+  if (zoomDelta) {
+    const updated = orbitControls.zoom({ controls: state.controls, camera: state.camera, speed: zoomSpeed }, zoomDelta)
+    state.controls = { ...state.controls, ...updated.controls }
+    zoomDelta = 0
+  }
+}
+
+// Rendered unconditionally on every tick (rather than only while the
+// camera is moving) since a WebGL canvas without preserveDrawingBuffer can
+// go blank on the next compositor present if nothing redraws it -- cheap
+// enough for a model this size.
+const updateAndRender = () => {
+  doRotatePanZoom()
+  const updates = orbitControls.update({ controls: state.controls, camera: state.camera })
+  state.controls = { ...state.controls, ...updates.controls }
+  state.camera.position = updates.camera.position
+  perspectiveCamera.update(state.camera, state.camera)
+  renderer(renderOptions)
+  window.requestAnimationFrame(updateAndRender)
+}
+window.requestAnimationFrame(updateAndRender)
+
+const moveHandler = (ev) => {
+  if (!pointerDown) return
+  const dx = lastX - ev.pageX
+  const dy = ev.pageY - lastY
+  const shiftKey = (ev.shiftKey === true) || (ev.touches && ev.touches.length > 2)
+  if (shiftKey) {
+    panDelta[0] += dx
+    panDelta[1] += dy
+  } else {
+    rotateDelta[0] -= dx
+    rotateDelta[1] -= dy
+  }
+  lastX = ev.pageX
+  lastY = ev.pageY
+  ev.preventDefault()
+}
+const downHandler = (ev) => {
+  pointerDown = true
+  lastX = ev.pageX
+  lastY = ev.pageY
+  containerElement.setPointerCapture(ev.pointerId)
+}
+const upHandler = (ev) => {
+  pointerDown = false
+  containerElement.releasePointerCapture(ev.pointerId)
+}
+const wheelHandler = (ev) => {
+  zoomDelta += ev.deltaY
+  ev.preventDefault()
+}
+
+containerElement.onpointermove = moveHandler
+containerElement.onpointerdown = downHandler
+containerElement.onpointerup = upHandler
+containerElement.onwheel = wheelHandler
+
+window.addEventListener('resize', () => {
+  const width = containerElement.clientWidth
+  const height = containerElement.clientHeight
+  perspectiveCamera.setProjection(state.camera, state.camera, { width, height })
+  perspectiveCamera.update(state.camera, state.camera)
+})
+
+// initial render with default parameters
+regenerate()
+</script>
+
+</body>
+</html>
