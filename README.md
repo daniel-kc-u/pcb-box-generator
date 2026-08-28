@@ -12,7 +12,9 @@ Feed it a PCB footprint, mounting-hole positions, and any side/top openings you 
 
 ## Usage
 
-Open [`generator.js`](generator.js) in the [OpenJSCAD online playground](https://openjscad.xyz/) or the [CLI / desktop app](https://github.com/jscad/OpenJSCAD.org)
+Navigate to https://daniel-kc-u.github.io/pcb-box-generator and start using the generator.
+
+Alternatively, open [`generator.js`](generator.js) in the [OpenJSCAD online playground](https://openjscad.xyz/).
 
 Adjust the parameters in the UI (or the `getParameterDefinitions` defaults in the script) to match your PCB and enclosure needs, then export the box and lid as separate STLs for printing.
 
